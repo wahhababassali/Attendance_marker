@@ -1,0 +1,164 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  body {
+    @apply font-sans antialiased;
+  }
+  
+  /* Premium scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-premium-dark;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gold-500/30 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-gold-500/50;
+  }
+}
+
+/* Custom component styles */
+@layer components {
+  /* Premium Glass Card */
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10;
+  }
+  
+  /* Premium Card with gold accent */
+  .premium-card {
+    @apply bg-gradient-to-br from-premium-card to-premium-dark border border-premium-border;
+    @apply shadow-2xl shadow-black/30;
+  }
+  
+  /* Premium Input */
+  .glass-input {
+    @apply bg-white/5 border border-white/10 text-white transition-all duration-300;
+  }
+  
+  .glass-input:focus {
+    @apply bg-white/10 border-gold-500/50 outline-none ring-2 ring-gold-500/20;
+  }
+  
+  .glass-input::placeholder {
+    @apply text-white/30;
+  }
+  
+  /* Premium Gold Button */
+  .gold-button {
+    @apply bg-gradient-to-r from-gold-500 via-gold-400 to-gold-500 bg-[length:200%_auto];
+    @apply text-premium-dark font-semibold;
+    @apply transition-all duration-300;
+    @apply shadow-lg shadow-gold-500/30 hover:shadow-gold-500/50;
+    @apply hover:-translate-y-0.5;
+  }
+  
+  .gold-button:hover {
+    @apply bg-[length:100%_auto];
+  }
+  
+  /* Premium Blue Button */
+  .premium-button {
+    @apply bg-gradient-to-r from-primary-500 via-primary-400 to-primary-500 bg-[length:200%_auto];
+    @apply text-white font-semibold;
+    @apply transition-all duration-300;
+    @apply shadow-lg shadow-primary-500/30 hover:shadow-primary-500/50;
+    @apply hover:-translate-y-0.5;
+  }
+  
+  .premium-button:hover {
+    @apply bg-[length:100%_auto];
+  }
+  
+  /* Gold Glow Effect */
+  .gold-glow {
+    @apply shadow-[0_0_20px_rgba(201,162,39,0.3)];
+  }
+  
+  .gold-glow:hover {
+    @apply shadow-[0_0_30px_rgba(201,162,39,0.5)];
+  }
+  
+  /* Premium Border */
+  .premium-border {
+    @apply border border-gold-500/20;
+  }
+  
+  /* Gold Text Gradient */
+  .gold-gradient-text {
+    @apply bg-gradient-to-r from-gold-300 via-gold-400 to-gold-500 bg-clip-text text-transparent;
+  }
+  
+  /* Animated Shimmer Button */
+  .shimmer-button {
+    @apply relative overflow-hidden;
+  }
+  
+  .shimmer-button::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full;
+    @apply bg-gradient-to-r from-transparent via-white/20 to-transparent;
+    @apply animate-shimmer;
+  }
+  
+  /* Premium Badge */
+  .premium-badge {
+    @apply px-3 py-1 rounded-full text-xs font-medium;
+    @apply bg-gradient-to-r from-gold-500/20 to-amber-500/20;
+    @apply border border-gold-500/30 text-gold-400;
+  }
+  
+  /* Avatar Frame */
+  .avatar-frame {
+    @apply relative;
+  }
+  
+  .avatar-frame::before {
+    content: '';
+    @apply absolute -inset-1 rounded-full;
+    @apply bg-gradient-to-r from-gold-400 via-gold-500 to-amber-400;
+    @apply opacity-75;
+  }
+  
+  .avatar-frame::after {
+    content: '';
+    @apply absolute -inset-0.5 rounded-full;
+    @apply bg-gradient-to-r from-gold-400 via-gold-500 to-amber-400;
+    @apply blur-sm opacity-50;
+  }
+}
+
+/* Custom utilities */
+@layer utilities {
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradientMove 15s ease infinite;
+  }
+  
+  @keyframes gradientMove {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+  
+  /* Premium background pattern */
+  .premium-pattern {
+    background-image: 
+      radial-gradient(circle at 25% 25%, rgba(201, 162, 39, 0.03) 0%, transparent 50%),
+      radial-gradient(circle at 75% 75%, rgba(59, 130, 246, 0.03) 0%, transparent 50%);
+  }
+  
+  /* Text shadow for premium effect */
+  .text-shadow-gold {
+    text-shadow: 0 0 20px rgba(201, 162, 39, 0.3);
+  }
+}

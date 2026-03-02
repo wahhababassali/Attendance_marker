@@ -26,8 +26,9 @@ exports.handler = async (event) => {
   try {
     // Parse the request body
     console.log('Event body:', event.body);
-    const { code } = JSON.parse(event.body);
+    const { code, checkSession } = JSON.parse(event.body);
     console.log('Code received:', code);
+    console.log('Check session flag:', checkSession);
 
     // Check if ADMIN_CODES exists
     if (!process.env.ADMIN_CODES) {
@@ -50,6 +51,44 @@ exports.handler = async (event) => {
     const isValid = adminCodes.includes(code);
     console.log('Code valid?', isValid);
 
+    // If this is a session check request (from student phone)
+    if (checkSession) {
+      if (isValid) {
+        console.log('✅ Session check successful for code:', code);
+        
+        // For session check, return mock session data
+        // In a production app, you might want to store active sessions in a database
+        return {
+          statusCode: 200,
+          headers,
+          body: JSON.stringify({
+            valid: true,
+            sessionInfo: {
+              courseTitle: "Active Session",
+              courseCode: "CS101",
+              program: "Computer Science",
+              radius: 50,
+              lat: 5.1234,
+              lng: -0.1234,
+              sessionCode: code,
+              startTime: new Date().toISOString()
+            }
+          })
+        };
+      } else {
+        console.log('❌ Invalid session check attempt:', code);
+        return {
+          statusCode: 401,
+          headers,
+          body: JSON.stringify({ 
+            valid: false, 
+            error: 'Invalid session code' 
+          })
+        };
+      }
+    }
+
+    // Regular admin login validation (original functionality)
     if (isValid) {
       // Get validity months
       const validityMonths = parseInt(process.env.CODE_VALIDITY_MONTHS) || 4;

@@ -24,6 +24,39 @@ const Register = () => {
   // School logo URL
   const schoolLogo = "https://atu.edu.gh/wp-content/uploads/2024/07/ATU-LOGO-AUTHENTIC-edit-1536x1470.png";
 
+  // Listen for storage changes (when admin starts/ends session)
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'adminLive') {
+        console.log('🔄 Session changed!', e.newValue);
+        
+        if (e.newValue) {
+          // Session was started or updated
+          try {
+            const admin = JSON.parse(e.newValue);
+            setSessionInfo(admin);
+            setMessage({ type: 'success', text: `New session started: ${admin.courseTitle}` });
+          } catch (error) {
+            console.error('Error parsing session:', error);
+          }
+        } else {
+          // Session was ended
+          setSessionInfo(null);
+          setSessionCode(''); // Clear the input
+          setMessage({ type: 'info', text: 'Session ended. Please wait for new session code.' });
+        }
+      }
+    };
+
+    // Listen for storage events (important for phone compatibility)
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
   // Get device fingerprint info
   const getDeviceInfo = async () => {
     // Get IP address from a free API
@@ -77,9 +110,23 @@ const Register = () => {
     
     // Get device info on mount
     getDeviceInfo();
+    
+    // Check for active session when page loads
+    const adminData = localStorage.getItem('adminLive');
+    if (adminData) {
+      try {
+        const admin = JSON.parse(adminData);
+        console.log('📱 Active session found on load:', admin);
+        // Don't auto-set session code, just log it
+      } catch (e) {
+        console.error('Error checking session on load:', e);
+      }
+    } else {
+      console.log('📱 No active session on load');
+    }
   }, []);
 
-  // FIXED: Validate session code when entered - MORE ROBUST VERSION
+  // Validate session code when entered - FIXED VERSION
   useEffect(() => {
     if (sessionCode.length === 6) {
       console.log('🔍 Checking session code:', sessionCode);
@@ -294,6 +341,26 @@ const Register = () => {
     });
   };
 
+  // Manual retry function
+  const retrySessionCheck = () => {
+    const adminData = localStorage.getItem('adminLive');
+    if (adminData) {
+      try {
+        const admin = JSON.parse(adminData);
+        if (admin.sessionCode === sessionCode.toUpperCase()) {
+          setSessionInfo(admin);
+          setMessage({ type: 'success', text: `Session found: ${admin.courseTitle}` });
+        } else {
+          setMessage({ type: 'error', text: 'Invalid session code' });
+        }
+      } catch (e) {
+        console.error('Error during retry:', e);
+      }
+    } else {
+      setMessage({ type: 'error', text: 'No active session' });
+    }
+  };
+
   return (
     <div className="min-h-screen relative">
       {/* Background Image */}
@@ -329,7 +396,7 @@ const Register = () => {
               <div className="flex items-start gap-2">
                 <span className="material-symbols-outlined text-amber-400">security</span>
                 <p className="text-amber-200 text-xs">
-                  Each device can only register once. Device information is captured for security purposes.
+                  Each device can only register once per session. When admin ends session, you can register again.
                 </p>
               </div>
             </div>
@@ -380,6 +447,20 @@ const Register = () => {
                   placeholder="XXXXXX"
                 />
               </div>
+              
+              {/* Retry button for when code doesn't work */}
+              {sessionCode.length === 6 && !sessionInfo && (
+                <div className="mt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={retrySessionCheck}
+                    className="text-xs text-gold-400 hover:text-gold-300 flex items-center gap-1"
+                  >
+                    <span className="material-symbols-outlined text-sm">refresh</span>
+                    Retry
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Session Info Display */}
@@ -391,6 +472,7 @@ const Register = () => {
                 </div>
                 <p className="text-white font-semibold">{sessionInfo.courseTitle}</p>
                 <p className="text-slate-400 text-xs">{sessionInfo.courseCode} • {sessionInfo.program}</p>
+                <p className="text-xs text-gold-400 mt-1">Radius: {sessionInfo.radius}m</p>
               </div>
             )}
 
@@ -480,8 +562,8 @@ const Register = () => {
               {/* Submit Button */}
               <button
                 type="submit"
-                disabled={isSubmitting}
-                className="w-full gold-button disabled:from-slate-600 disabled:to-slate-700 disabled:shadow-none py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 font-semibold text-slate-900"
+                disabled={isSubmitting || !sessionInfo}
+                className="w-full gold-button disabled:from-slate-600 disabled:to-slate-700 disabled:shadow-none disabled:cursor-not-allowed py-3 px-6 rounded-xl transition-all flex items-center justify-center gap-2 font-semibold text-slate-900"
               >
                 {isSubmitting ? (
                   <>

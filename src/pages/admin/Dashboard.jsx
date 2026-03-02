@@ -10,7 +10,7 @@ const Dashboard = () => {
   const [courseTitle, setCourseTitle] = useState('');
   const [courseCode, setCourseCode] = useState('');
   const [program, setProgram] = useState('');
-  const [radius, setRadius] = useState(50); // Changed default to 50m
+  const [radius, setRadius] = useState(50);
   const [attendanceList, setAttendanceList] = useState([]);
   
   // Course rep info
@@ -101,7 +101,7 @@ const Dashboard = () => {
     );
   };
 
-  // Start session
+  // Start session - UPDATED with better logging
   const startSession = () => {
     if (!courseTitle || !courseCode || !program) {
       alert('Please fill in all course details');
@@ -112,9 +112,10 @@ const Dashboard = () => {
       return;
     }
     
-    // Auto-generate session code
     const newSessionCode = generateSessionCode();
     setSessionCode(newSessionCode);
+    
+    console.log('🎲 Generated code for students:', newSessionCode);
 
     const sessionData = {
       courseTitle,
@@ -128,17 +129,36 @@ const Dashboard = () => {
     };
 
     localStorage.setItem('adminLive', JSON.stringify(sessionData));
+    
+    // Verify it saved
+    const saved = JSON.parse(localStorage.getItem('adminLive'));
+    console.log('✅ Session saved with code:', saved.sessionCode);
+    
     setSessionActive(true);
   };
 
-  // End session
+  // End session - UPDATED to clear device registrations
   const endSession = () => {
+    // Remove current session
     localStorage.removeItem('adminLive');
+    
+    // IMPORTANT: Clear all student registrations for new session
+    // This allows students to register again with new session code
+    localStorage.removeItem('registeredDevices');
+    
+    // Keep attendance records for history but clear for new session display
+    // localStorage.removeItem('attendanceRecords');
+    
     setSessionActive(false);
     setSessionCode('');
     setCourseTitle('');
     setCourseCode('');
     setProgram('');
+    
+    console.log('✅ Session ended. Students can now register with new code.');
+    
+    // Show success message
+    alert('Session ended. Students can now register with a new session code.');
   };
 
   // Refresh attendance list
@@ -322,7 +342,7 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left Column - Session Controls */}
             <div className="lg:col-span-1 space-y-6">
-              {/* Session Status Card - Darker background for better contrast */}
+              {/* Session Status Card */}
               <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 border border-gold-500/30 shadow-2xl">
                 <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
                   <span className="material-symbols-outlined text-gold-400">settings</span>

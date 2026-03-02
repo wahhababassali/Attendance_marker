@@ -143,9 +143,46 @@ export default function Confirm() {
                     <span className="text-slate-300">Time</span>
                     <span className="text-white">{new Date(lastAttendance.timestamp).toLocaleTimeString()}</span>
                   </div>
-                  <div className="flex justify-between items-center py-2">
-                    <span className="text-slate-300">Distance</span>
-                    <span className="text-white">{lastAttendance.distance}m from instructor</span>
+                  
+                  {/* DISTANCE STATUS - ADDED */}
+                  <div className="flex justify-between items-center py-2 border-b border-white/10">
+                    <span className="text-slate-300">Your Distance</span>
+                    <span className="text-white font-mono">{lastAttendance.distance}m</span>
+                  </div>
+                  
+                  {/* SIMPLE RADIUS STATUS */}
+                  <div className="mt-3 pt-2">
+                    <div className={`flex items-center gap-2 p-3 rounded-lg ${
+                      lastAttendance.distance <= 50 
+                        ? 'bg-green-500/20 border border-green-500/40' 
+                        : lastAttendance.distance <= 80
+                          ? 'bg-yellow-500/20 border border-yellow-500/40'
+                          : 'bg-green-500/20 border border-green-500/40'
+                    }`}>
+                      <span className={`material-symbols-outlined ${
+                        lastAttendance.distance <= 50 
+                          ? 'text-green-400' 
+                          : lastAttendance.distance <= 80
+                            ? 'text-yellow-400'
+                            : 'text-green-400'
+                      }`}>
+                        {lastAttendance.distance <= 50 ? 'check_circle' : 'info'}
+                      </span>
+                      <span className={`text-sm ${
+                        lastAttendance.distance <= 50 
+                          ? 'text-green-400' 
+                          : lastAttendance.distance <= 80
+                            ? 'text-yellow-400'
+                            : 'text-green-400'
+                      }`}>
+                        {lastAttendance.distance <= 50 
+                          ? '✅ Within standard range' 
+                          : lastAttendance.distance <= 80
+                            ? '📍 Getting close to limit'
+                            : '✅ Within large class range'
+                        }
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>

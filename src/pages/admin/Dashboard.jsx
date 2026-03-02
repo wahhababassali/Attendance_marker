@@ -10,7 +10,7 @@ const Dashboard = () => {
   const [courseTitle, setCourseTitle] = useState('');
   const [courseCode, setCourseCode] = useState('');
   const [program, setProgram] = useState('');
-  const [radius, setRadius] = useState(100);
+  const [radius, setRadius] = useState(50); // Changed default to 50m
   const [attendanceList, setAttendanceList] = useState([]);
   
   // Course rep info
@@ -232,6 +232,20 @@ const Dashboard = () => {
     doc.save(`attendance_${sessionCode}_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
+  // Get radius color based on value
+  const getRadiusColor = () => {
+    if (radius <= 30) return 'text-green-400';
+    if (radius <= 60) return 'text-yellow-400';
+    return 'text-orange-400';
+  };
+
+  // Get radius recommendation
+  const getRadiusRecommendation = () => {
+    if (radius <= 30) return 'Small classroom';
+    if (radius <= 60) return 'Lecture hall';
+    return 'Outdoor area';
+  };
+
   return (
     <div className="min-h-screen relative">
       {/* Background Image */}
@@ -316,7 +330,7 @@ const Dashboard = () => {
                 </h2>
 
                 {!sessionActive ? (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {/* Course Title */}
                     <div>
                       <label className="block text-sm text-slate-300 mb-2">Course Title</label>
@@ -353,23 +367,45 @@ const Dashboard = () => {
                       />
                     </div>
 
-                    {/* Radius Slider */}
-                    <div>
-                      <label className="block text-sm text-slate-300 mb-2">
-                        Attendance Radius: <span className="text-gold-400 font-semibold">{radius}m</span>
+                    {/* Enhanced Radius Slider */}
+                    <div className="bg-slate-800/50 rounded-xl p-4 border border-gold-500/20">
+                      <label className="block text-sm text-slate-300 mb-3 flex items-center gap-2">
+                        <span className="material-symbols-outlined text-gold-400 text-lg">distance</span>
+                        <span>Attendance Radius</span>
                       </label>
-                      <input
-                        type="range"
-                        min="50"
-                        max="500"
-                        step="10"
-                        value={radius}
-                        onChange={(e) => setRadius(e.target.value)}
-                        className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-gold-500"
-                      />
-                      <div className="flex justify-between text-xs text-slate-500 mt-1">
-                        <span>50m</span>
-                        <span>500m</span>
+                      
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-xs text-slate-500 w-8">10m</span>
+                        <input
+                          type="range"
+                          min="10"
+                          max="100"
+                          step="5"
+                          value={radius}
+                          onChange={(e) => setRadius(parseInt(e.target.value))}
+                          className="flex-1 h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-gold-500"
+                        />
+                        <span className="text-xs text-slate-500 w-8">100m</span>
+                      </div>
+
+                      <div className="flex justify-between items-center mt-2">
+                        <div>
+                          <span className="text-xs text-slate-400 block">Selected</span>
+                          <span className={`text-2xl font-bold ${getRadiusColor()}`}>{radius}m</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs text-slate-400 block">Recommended for</span>
+                          <span className="text-sm text-gold-400">{getRadiusRecommendation()}</span>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 pt-2 border-t border-slate-700">
+                        <div className="flex items-start gap-2">
+                          <span className="material-symbols-outlined text-gold-400 text-sm">info</span>
+                          <p className="text-xs text-slate-400">
+                            Students must be within <span className="text-gold-400 font-bold">{radius}m</span> of your location to mark attendance
+                          </p>
+                        </div>
                       </div>
                     </div>
 
@@ -417,28 +453,40 @@ const Dashboard = () => {
                     </button>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {/* Active Session Info */}
-                    <div className="p-3 bg-green-500/20 border border-green-500/40 rounded-xl">
-                      <div className="flex items-center gap-2 text-green-400 mb-1">
+                    <div className="p-4 bg-green-500/20 border border-green-500/40 rounded-xl">
+                      <div className="flex items-center gap-2 text-green-400 mb-2">
                         <span className="material-symbols-outlined text-sm">check_circle</span>
                         <span className="font-semibold text-sm">Session Active</span>
                       </div>
-                      <p className="text-white font-bold">{courseTitle}</p>
-                      <p className="text-slate-300 text-xs">{courseCode} • {program}</p>
+                      <p className="text-white font-bold text-lg">{courseTitle}</p>
+                      <p className="text-slate-300 text-sm">{courseCode} • {program}</p>
+                      
+                      {/* Show active radius */}
+                      <div className="mt-3 flex items-center gap-2 text-sm">
+                        <span className="material-symbols-outlined text-gold-400 text-base">distance</span>
+                        <span className="text-slate-300">Radius:</span>
+                        <span className="text-gold-400 font-bold">{radius}m</span>
+                        <span className="text-xs text-slate-500 ml-auto">{getRadiusRecommendation()}</span>
+                      </div>
                     </div>
 
                     {/* Session Code Display */}
-                    <div className="p-3 bg-slate-800 rounded-xl border border-gold-500/30 text-center">
+                    <div className="p-4 bg-slate-800 rounded-xl border border-gold-500/30 text-center">
                       <p className="text-xs text-slate-400 mb-2">Share this code with students</p>
-                      <p className="text-3xl font-black tracking-[0.3em] gold-gradient-text font-mono bg-gold-500/10 px-4 py-2 rounded-xl border border-gold-500/20">
+                      <p className="text-4xl font-black tracking-[0.3em] gold-gradient-text font-mono bg-gold-500/10 px-4 py-3 rounded-xl border border-gold-500/20">
                         {sessionCode}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-3 flex items-center justify-center gap-1">
+                        <span className="material-symbols-outlined text-xs">info</span>
+                        Students need this code to join
                       </p>
                     </div>
 
                     <button
                       onClick={endSession}
-                      className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
+                      className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
                     >
                       <span className="material-symbols-outlined">stop</span>
                       End Session
@@ -506,8 +554,15 @@ const Dashboard = () => {
                             <td className="py-2 text-slate-400 text-xs">
                               {new Date(record.timestamp).toLocaleTimeString()}
                             </td>
-                            <td className="py-2 text-slate-400 text-xs">
-                              {record.distance}m
+                            <td className="py-2">
+                              <span className={`text-xs font-mono px-2 py-1 rounded ${
+                                record.distance <= radius 
+                                  ? 'bg-green-500/20 text-green-400' 
+                                  : 'bg-red-500/20 text-red-400'
+                              }`}>
+                                {record.distance}m
+                                {record.distance <= radius && ' ✅'}
+                              </span>
                             </td>
                           </tr>
                         ))}

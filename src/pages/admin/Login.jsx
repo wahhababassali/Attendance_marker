@@ -1,22 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// Get admin codes from environment variable
-const getAdminCodes = () => {
-  const codesString = import.meta.env.VITE_ADMIN_CODES || '';
-  if (!codesString) {
-    console.warn('VITE_ADMIN_CODES not configured. Add codes to .env file.');
-    return [];
-  }
-  return codesString.split(',').map(code => code.trim()).filter(code => code);
-};
-
-// Get code validity months from environment variable
-const CODE_VALIDITY_MONTHS = parseInt(import.meta.env.VITE_CODE_VALIDITY_MONTHS) || 4;
-
-// Get admin codes on component mount
-const ADMIN_CODES = getAdminCodes();
-
 const Login = () => {
   const navigate = useNavigate();
   const [accessCode, setAccessCode] = useState('');
@@ -46,7 +30,7 @@ const Login = () => {
     }
   }, []);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     
     // If new user, save course rep data first
@@ -61,46 +45,54 @@ const Login = () => {
     setIsLoading(true);
     setError('');
 
-    // Simulate loading
-    setTimeout(() => {
-      const codeIndex = ADMIN_CODES.indexOf(accessCode.toUpperCase());
-      
-      if (codeIndex !== -1) {
-        // Code exists - check if valid (not expired)
+    try {
+      // Call Netlify Function to verify the code
+      const response = await fetch('/.netlify/functions/verify-admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          code: accessCode.toUpperCase() 
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.valid) {
+        // Valid code - check local expiry (optional, for UI feedback)
         const storedData = localStorage.getItem('adminCodeData');
         const codeData = storedData ? JSON.parse(storedData) : {};
         const codeEntry = codeData[accessCode.toUpperCase()];
         
-        if (codeEntry && codeEntry.expiresAt) {
-          const expiryDate = new Date(codeEntry.expiresAt);
-          if (new Date() > expiryDate) {
-            setError('This code has expired. Please contact your instructor for a new code.');
-            setIsLoading(false);
-            return;
-          }
-        }
-        
-        // Valid code - store session
+        // Store session
         localStorage.setItem('adminSession', 'true');
         localStorage.setItem('adminCode', accessCode.toUpperCase());
         
-        // Initialize code data if not exists
+        // Store expiry from server
+        if (data.expiresAt) {
+          localStorage.setItem('adminExpiresAt', data.expiresAt);
+        }
+        
+        // Initialize code data if not exists (for UI history)
         if (!codeEntry) {
-          const expiresAt = new Date();
-          expiresAt.setMonth(expiresAt.getMonth() + CODE_VALIDITY_MONTHS);
           codeData[accessCode.toUpperCase()] = {
             createdAt: new Date().toISOString(),
-            expiresAt: expiresAt.toISOString()
+            expiresAt: data.expiresAt || new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString() // Fallback ~4 months
           };
           localStorage.setItem('adminCodeData', JSON.stringify(codeData));
         }
         
         navigate('/admin/dashboard');
       } else {
-        setError('Invalid access code. Please check your code and try again.');
+        setError(data.error || 'Invalid access code. Please check your code and try again.');
         setIsLoading(false);
       }
-    }, 500);
+    } catch (err) {
+      console.error('Login error:', err);
+      setError('Login failed. Please check your connection and try again.');
+      setIsLoading(false);
+    }
   };
 
   const handleCourseRepChange = (e) => {

@@ -79,22 +79,47 @@ const Register = () => {
     getDeviceInfo();
   }, []);
 
-  // Validate session code when entered
+  // FIXED: Validate session code when entered - MORE ROBUST VERSION
   useEffect(() => {
     if (sessionCode.length === 6) {
+      console.log('🔍 Checking session code:', sessionCode);
+      
       const adminData = localStorage.getItem('adminLive');
+      console.log('📦 adminLive from localStorage:', adminData);
+      
       if (adminData) {
-        const admin = JSON.parse(adminData);
-        if (admin.sessionCode === sessionCode.toUpperCase()) {
-          setSessionInfo(admin);
-          setMessage({ type: 'success', text: `Session found: ${admin.courseTitle}` });
-        } else {
+        try {
+          const admin = JSON.parse(adminData);
+          
+          // IMPORTANT: Convert BOTH to uppercase and trim any spaces
+          const storedCode = admin.sessionCode?.toString().toUpperCase().trim() || '';
+          const enteredCode = sessionCode.toUpperCase().trim();
+          
+          console.log('🔑 Stored session code:', storedCode);
+          console.log('📝 Entered code:', enteredCode);
+          console.log('✅ Match?', storedCode === enteredCode);
+          
+          if (storedCode === enteredCode) {
+            setSessionInfo(admin);
+            setMessage({ type: 'success', text: `Session found: ${admin.courseTitle}` });
+          } else {
+            setSessionInfo(null);
+            setMessage({ type: 'error', text: 'Invalid session code' });
+          }
+        } catch (error) {
+          console.error('Error parsing admin data:', error);
           setSessionInfo(null);
-          setMessage({ type: 'error', text: 'Invalid session code' });
+          setMessage({ type: 'error', text: 'Error reading session data' });
         }
       } else {
+        console.log('❌ No active session found');
         setSessionInfo(null);
         setMessage({ type: 'error', text: 'No active session. Please wait for the instructor.' });
+      }
+    } else {
+      // Clear message when code is less than 6 characters
+      if (sessionCode.length > 0) {
+        setMessage({ type: '', text: '' });
       }
     }
   }, [sessionCode]);

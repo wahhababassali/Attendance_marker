@@ -1,4 +1,21 @@
 // netlify/functions/verify-admin-code.js
+const { initializeApp } = require('firebase/app');
+const { getFirestore, doc, getDoc } = require('firebase/firestore');
+
+// Firebase config - same as client app
+const firebaseConfig = {
+  apiKey: "AIzaSyCE36858RyCF7YAol1JtCY1nCtq3mZhONs",
+  authDomain: "attendance-marker-86d42.firebaseapp.com",
+  projectId: "attendance-marker-86d42",
+  storageBucket: "attendance-marker-86d42.appspot.com",
+  messagingSenderId: "115455354307",
+  appId: "1:115455354307:web:placeholder"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 exports.handler = async (event) => {
   console.log('🚀 Function started');
   
@@ -48,33 +65,63 @@ exports.handler = async (event) => {
     console.log('First 3 codes:', adminCodes.slice(0, 3));
 
     // Check if code is valid
-    const isValid = adminCodes.includes(code);
+    const isValid = adminCodes.includes(code.toUpperCase());
     console.log('Code valid?', isValid);
 
     // If this is a session check request (from student phone)
     if (checkSession) {
       if (isValid) {
-        console.log('✅ Session check successful for code:', code);
+        console.log('✅ Session check for code:', code);
         
-        // For session check, return mock session data
-        // In a production app, you might want to store active sessions in a database
-        return {
-          statusCode: 200,
-          headers,
-          body: JSON.stringify({
-            valid: true,
-            sessionInfo: {
-              courseTitle: "Active Session",
-              courseCode: "CS101",
-              program: "Computer Science",
-              radius: 50,
-              lat: 5.1234,
-              lng: -0.1234,
-              sessionCode: code,
-              startTime: new Date().toISOString()
-            }
-          })
-        };
+        // Get session from Firebase
+        try {
+          const sessionRef = doc(db, 'sessions', code.toUpperCase());
+          const sessionSnap = await getDoc(sessionRef);
+          
+          if (sessionSnap.exists() && sessionSnap.data().active) {
+            const sessionData = sessionSnap.data();
+            console.log('✅ Session found in Firebase:', sessionData.courseTitle);
+            
+            return {
+              statusCode: 200,
+              headers,
+              body: JSON.stringify({
+                valid: true,
+                sessionInfo: {
+                  courseTitle: sessionData.courseTitle,
+                  courseCode: sessionData.courseCode,
+                  program: sessionData.program,
+                  radius: sessionData.radius,
+                  lat: sessionData.lat,
+                  lng: sessionData.lng,
+                  sessionCode: sessionData.sessionCode,
+                  active: sessionData.active,
+                  startTime: sessionData.startTime
+                }
+              })
+            };
+          } else {
+            console.log('❌ Session not found or not active');
+            return {
+              statusCode: 401,
+              headers,
+              body: JSON.stringify({ 
+                valid: false, 
+                error: 'Invalid or expired session code' 
+              })
+            };
+          }
+        } catch (fbError) {
+          console.error('Firebase error:', fbError.message);
+          return {
+            statusCode: 500,
+            headers,
+            body: JSON.stringify({ 
+              valid: false, 
+              error: 'Database error. Please try again.' 
+            })
+          };
+        }
       } else {
         console.log('❌ Invalid session check attempt:', code);
         return {
@@ -132,3 +179,4 @@ exports.handler = async (event) => {
     };
   }
 };
+

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { verifyAdminCode, getCourseRep, saveCourseRep } from '../../firebase/service';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -20,14 +21,25 @@ const Login = () => {
   // School logo URL
   const schoolLogo = "https://atu.edu.gh/wp-content/uploads/2024/07/ATU-LOGO-AUTHENTIC-edit-1536x1470.png";
 
-  // Check if course rep already registered
+  // Check if course rep already registered in Firebase
   useEffect(() => {
-    const savedCourseRep = localStorage.getItem('courseRepData');
-    if (savedCourseRep) {
-      setCourseRepData(JSON.parse(savedCourseRep));
-    } else {
-      setIsNewUser(true);
-    }
+    const checkCourseRep = async () => {
+      // First check local storage for quick load
+      const savedCourseRep = localStorage.getItem('courseRepData');
+      if (savedCourseRep) {
+        const parsed = JSON.parse(savedCourseRep);
+        setCourseRepData(parsed);
+        
+        // Also check Firebase for sync
+        const firebaseRep = await getCourseRep(parsed.indexNumber);
+        if (firebaseRep.exists) {
+          setCourseRepData(firebaseRep);
+        }
+      } else {
+        setIsNewUser(true);
+      }
+    };
+    checkCourseRep();
   }, []);
 
   const handleSubmit = async (e) => {
@@ -39,6 +51,9 @@ const Login = () => {
         setError('Please enter your name and index number');
         return;
       }
+      // Save to Firebase
+      await saveCourseRep(courseRepData);
+      // Also save to localStorage for offline access
       localStorage.setItem('courseRepData', JSON.stringify(courseRepData));
     }
     
@@ -46,46 +61,25 @@ const Login = () => {
     setError('');
 
     try {
-      // Call Netlify Function to verify the code
-      const response = await fetch('/.netlify/functions/verify-admin', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          code: accessCode.toUpperCase() 
-        })
-      });
+      // Verify admin code using Firebase
+      const result = await verifyAdminCode(accessCode);
 
-      const data = await response.json();
-
-      if (data.valid) {
-        // Valid code - check local expiry (optional, for UI feedback)
-        const storedData = localStorage.getItem('adminCodeData');
-        const codeData = storedData ? JSON.parse(storedData) : {};
-        const codeEntry = codeData[accessCode.toUpperCase()];
-        
-        // Store session
+      if (result.valid) {
+        // Store session in localStorage for UI purposes
         localStorage.setItem('adminSession', 'true');
         localStorage.setItem('adminCode', accessCode.toUpperCase());
         
-        // Store expiry from server
-        if (data.expiresAt) {
-          localStorage.setItem('adminExpiresAt', data.expiresAt);
+        // Store expiry from Firebase if available
+        if (result.expiresAt) {
+          localStorage.setItem('adminExpiresAt', result.expiresAt);
         }
         
-        // Initialize code data if not exists (for UI history)
-        if (!codeEntry) {
-          codeData[accessCode.toUpperCase()] = {
-            createdAt: new Date().toISOString(),
-            expiresAt: data.expiresAt || new Date(Date.now() + 120 * 24 * 60 * 60 * 1000).toISOString() // Fallback ~4 months
-          };
-          localStorage.setItem('adminCodeData', JSON.stringify(codeData));
-        }
+        // Store course rep data
+        localStorage.setItem('courseRepData', JSON.stringify(courseRepData));
         
         navigate('/admin/dashboard');
       } else {
-        setError(data.error || 'Invalid access code. Please check your code and try again.');
+        setError(result.error || 'Invalid access code. Please check your code and try again.');
         setIsLoading(false);
       }
     } catch (err) {

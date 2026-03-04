@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Import Admin Codes to Firebase</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
+    .success { color: green; }
+    .error { color: red; }
+    .progress { color: blue; }
+    button { padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    #log { background: #f5f5f5; padding: 10px; max-height: 400px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>Import Admin Codes to Firebase</h1>
+  <p>Click the button below to import all admin codes into Firebase.</p>
+  
+  <button id="importBtn">Import Codes</button>
+  <div id="log"></div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js';
+    import { getFirestore, doc, setDoc } from 'https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore.js';
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCE36858RyCF7YAol1JtCY1nCtq3mZhONs",
+      authDomain: "attendance-marker-86d42.firebaseapp.com",
+      projectId: "attendance-marker-86d42",
+      storageBucket: "attendance-marker-86d42.appspot.com",
+      messagingSenderId: "115455354307",
+      appId: "1:115455354307:web:placeholder"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    // Your admin codes
+    const adminCodes = [
+      'A7KD9M2N','B3PF8XQ4','C9WL2TR5','D5HK7VS6','E2NT4WR7',
+      'F8QW6YP3','G4RX9ZT8','H6SM3AV2','I1DJ5BU9','J7EK4CW3',
+      'K3FP8VX5','L9GT2WY6','M5BK7NX7','N2DL9PU3','P8HM4QK8',
+      'Q4JR6WLT','R6NT3XMV','S1PW8YBZ','T7QK2DNC','U3WF5GFP',
+      'V9XR8HJQ','W5DM4KRL','X2BN6PST','Y8CT9WHU','Z4GP7VF6',
+      'A6KJ2M3B','B9DL5N8C','C1FK4PQ7','D7HW6RT9','E3NP8VS2',
+      'F8QT4WX5','G2RM6YBZ','H5SK8ADV','I9TD3CF6','J4BF7GE8',
+      'K7CP9HJ3','L1GK4MQ5','M6DX8NR7','N3FV6PT8','P9HW2QK4',
+      'Q5BJ7WL6','R8DK3XM2','S4FP9ZU7','T2GR8YV3','U7KC5AP9',
+      'V1NM4BQ6','W9PT7DF3','X6RW8GE5','Y3TS9HF7','Z8QF4JK2',
+      'A5DM7LP4','B2KX9MQ6','C7HR8NV3','D4JP6TW5','E9GK3RF7',
+      'F6BS9WQ8','G1DT5XM4','H8CV6ZN2','I3PW7AB5','J7QF9CD6',
+      'K5BM8EF3','L9AD7GH4','M2CP6IJ5','N8DX4KL6','P3FY7MN7',
+      'Q7GR9PQ8','R4HT6RS9','S1KW8TV2','T9JM5UX3','U6BL7VY4',
+      'V2CF9WZ5','W8DP6AB7','X5EK8CD3','Y1GQ9EF4','Z7HR4GH5',
+      'A4KS7IJ6','B9FM3KL2','C6DT8MN3','D2AP5PQ7','E8CR9RS4',
+      'F3JW6TV5','G5HK8WX6','H1QB7YZ2','I7PF4AV8','J4DG9BU3',
+      'K9EJ6CW5','L3FR7DF6','M8CP5GH7','N5BX9IJ2','P1HV8KL4',
+      'Q7KW6MN5','R4JP9PQ3','S2GT8RS6','T9DF7TV7','U6CM4WX8',
+      'V3BR9YZ5','W8AF6AB1','X5DK8CD7','Y2EQ9EF3','Z9GP4GH8',
+      'A7HR5IJ4','B1KF8KL6','C8DT7MN2','D5CQ9PQ5','E4BR8RS7'
+    ];
+
+    const log = document.getElementById('log');
+    const btn = document.getElementById('importBtn');
+
+    function addLog(msg, type) {
+      const div = document.createElement('div');
+      div.className = type;
+      div.textContent = msg;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      log.innerHTML = '';
+      
+      const expiresAt = new Date();
+      expiresAt.setMonth(expiresAt.getMonth() + 4);
+      const expiresStr = expiresAt.toISOString();
+
+      let success = 0;
+      let failed = 0;
+
+      for (const code of adminCodes) {
+        try {
+          await setDoc(doc(db, 'adminCodes', code), {
+            code: code,
+            createdAt: new Date().toISOString(),
+            expiresAt: expiresStr,
+            isActive: true,
+            validityMonths: 4
+          });
+          success++;
+          addLog(`✅ Imported: ${code}`, 'success');
+        } catch (error) {
+          failed++;
+          addLog(`❌ Failed: ${code} - ${error.message}`, 'error');
+        }
+        
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 50));
+      }
+
+      addLog(`\n🎉 Complete! Success: ${success}, Failed: ${failed}`, 'progress');
+      btn.disabled = false;
+    });
+  </script>
+</body>
+</html>

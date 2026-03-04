@@ -1,5 +1,7 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getSession, markAttendance, checkDeviceRegistration } from '../../firebase/service';
 
 const Register = () => {
   const navigate = useNavigate();
@@ -19,13 +21,9 @@ const Register = () => {
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [isCheckingSession, setIsCheckingSession] = useState(false);
 
-  // Background image URL
   const backgroundImage = "https://atu.edu.gh/wp-content/uploads/2024/07/2L4A8614-1-1536x1024.jpg";
-  
-  // School logo URL
   const schoolLogo = "https://atu.edu.gh/wp-content/uploads/2024/07/ATU-LOGO-AUTHENTIC-edit-1536x1470.png";
 
-  // Get device fingerprint info
   const getDeviceInfo = async () => {
     let ipAddress = 'unknown';
     try {
@@ -50,17 +48,34 @@ const Register = () => {
     return deviceInfo;
   };
 
-  // Check if this device has already registered
-  const checkDeviceRegistration = (deviceInfo) => {
-    const registeredDevices = JSON.parse(localStorage.getItem('registeredDevices') || '[]');
-    const existingByIP = registeredDevices.find(d => d.ipAddress === deviceInfo.ipAddress);
-    if (existingByIP) {
-      return { allowed: false, reason: 'ip', existing: existingByIP };
+  const checkDeviceReg = async (deviceInfo) => {
+    // Use the validated session's code if available
+    const currentSessionCode = sessionInfo?.sessionCode || sessionCode;
+    
+    try {
+      // Pass sessionCode to allow re-registration for new sessions
+      const result = await checkDeviceRegistration(deviceInfo.ipAddress, currentSessionCode);
+      if (result.registered) {
+        return { allowed: false, reason: 'ip', existing: result.data };
+      }
+      return { allowed: true };
+    } catch (error) {
+      console.error('Error checking device registration:', error);
+      // Check localStorage but also consider session
+      const registeredDevices = JSON.parse(localStorage.getItem('registeredDevices') || '[]');
+      const existingByIP = registeredDevices.find(d => d.ipAddress === deviceInfo.ipAddress);
+      
+      if (existingByIP) {
+        // Check if it's a different session (allow re-registration)
+        if (currentSessionCode && existingByIP.sessionCode !== currentSessionCode) {
+          return { allowed: true };
+        }
+        return { allowed: false, reason: 'ip', existing: existingByIP };
+      }
+      return { allowed: true };
     }
-    return { allowed: true };
   };
 
-  // Load saved student data on mount
   useEffect(() => {
     const savedData = localStorage.getItem('studentData');
     if (savedData) {
@@ -74,67 +89,58 @@ const Register = () => {
     getDeviceInfo();
   }, []);
 
-  // CRITICAL FIX: Check session by calling Netlify Function
-  const checkSessionWithServer = async (code) => {
+  const checkSessionWithFirebase = async (code) => {
     setIsCheckingSession(true);
+    setMessage({ type: '', text: '' });
+    
     try {
-      const response = await fetch('/.netlify/functions/verify-admin-code', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          code: code.toUpperCase().trim(),
-          checkSession: true // Special flag to just check if session exists
-        })
-      });
-      
-      const data = await response.json();
-      
-      if (data.valid && data.sessionInfo) {
-        // Session exists on server!
-        setSessionInfo(data.sessionInfo);
-        setMessage({ type: 'success', text: `Session found: ${data.sessionInfo.courseTitle}` });
+      try {
+        const sessionData = await getSession(code.toUpperCase().trim());
         
-        // Also save to localStorage for other parts of the app
-        localStorage.setItem('adminLive', JSON.stringify(data.sessionInfo));
-        return true;
-      } else {
-        setSessionInfo(null);
-        setMessage({ type: 'error', text: data.error || 'Invalid session code' });
-        return false;
+        if (sessionData.exists && sessionData.active) {
+          setSessionInfo(sessionData);
+          setMessage({ type: 'success', text: `Session found: ${sessionData.courseTitle}` });
+          localStorage.setItem('adminLive', JSON.stringify(sessionData));
+          setIsCheckingSession(false);
+          return true;
+        }
+      } catch (fbError) {
+        console.log('Firebase session check error:', fbError);
       }
+      
+      const adminData = localStorage.getItem('adminLive');
+      if (adminData) {
+        try {
+          const admin = JSON.parse(adminData);
+          const storedCode = admin.sessionCode?.toString().toUpperCase().trim() || '';
+          const enteredCode = code.toUpperCase().trim();
+          
+          if (storedCode === enteredCode && admin.active) {
+            setSessionInfo(admin);
+            setMessage({ type: 'success', text: `Session found: ${admin.courseTitle}` });
+            setIsCheckingSession(false);
+            return true;
+          }
+        } catch (e) {
+          console.error('Error parsing local session:', e);
+        }
+      }
+      
+      setSessionInfo(null);
+      setMessage({ type: 'error', text: 'Invalid or expired session code. Ask your course rep for a new code.' });
+      return false;
     } catch (error) {
       console.error('Error checking session:', error);
-      setMessage({ type: 'error', text: 'Could not verify session. Please try again.' });
+      setMessage({ type: 'error', text: 'Could not verify session. Check your internet connection.' });
       return false;
     } finally {
       setIsCheckingSession(false);
     }
   };
 
-  // Validate session code when entered - UPDATED to use server check
   useEffect(() => {
     if (sessionCode.length === 6) {
-      // First check localStorage (fast, for same device)
-      const adminData = localStorage.getItem('adminLive');
-      
-      if (adminData) {
-        try {
-          const admin = JSON.parse(adminData);
-          const storedCode = admin.sessionCode?.toString().toUpperCase().trim() || '';
-          const enteredCode = sessionCode.toUpperCase().trim();
-          
-          if (storedCode === enteredCode) {
-            setSessionInfo(admin);
-            setMessage({ type: 'success', text: `Session found: ${admin.courseTitle}` });
-            return;
-          }
-        } catch (error) {
-          console.error('Error parsing local session:', error);
-        }
-      }
-      
-      // If not in localStorage, check with server (for cross-device)
-      checkSessionWithServer(sessionCode);
+      checkSessionWithFirebase(sessionCode);
     } else {
       if (sessionCode.length > 0) {
         setMessage({ type: '', text: '' });
@@ -142,7 +148,6 @@ const Register = () => {
     }
   }, [sessionCode]);
 
-  // Get student location
   const getStudentLocation = () => {
     setLocationStatus('loading');
     
@@ -174,7 +179,6 @@ const Register = () => {
     );
   };
 
-  // Calculate distance
   const calculateDistance = (lat1, lng1, lat2, lng2) => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
@@ -190,7 +194,6 @@ const Register = () => {
     return R * c;
   };
 
-  // Handle profile image
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -215,8 +218,7 @@ const Register = () => {
 
     const currentDeviceInfo = await getDeviceInfo();
     
-    // Check device registration
-    const deviceCheck = checkDeviceRegistration(currentDeviceInfo);
+    const deviceCheck = await checkDeviceReg(currentDeviceInfo);
     if (!deviceCheck.allowed) {
       setMessage({ 
         type: 'error', 
@@ -226,7 +228,6 @@ const Register = () => {
       return;
     }
 
-    // Validate all fields
     if (!sessionInfo) {
       setMessage({ type: 'error', text: 'Please enter a valid 6-character session code' });
       setIsSubmitting(false);
@@ -245,7 +246,6 @@ const Register = () => {
       return;
     }
 
-    // Calculate distance
     const distance = calculateDistance(
       studentLocation.lat,
       studentLocation.lng,
@@ -267,26 +267,42 @@ const Register = () => {
         deviceInfo: currentDeviceInfo
       };
 
-      const existingAttendance = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
-      existingAttendance.push(attendance);
-      localStorage.setItem('attendanceRecords', JSON.stringify(existingAttendance));
-
-      const registeredDevices = JSON.parse(localStorage.getItem('registeredDevices') || '[]');
-      registeredDevices.push({
-        ...currentDeviceInfo,
-        name: formData.name,
-        indexNumber: formData.indexNumber,
-        registeredAt: new Date().toISOString()
-      });
-      localStorage.setItem('registeredDevices', JSON.stringify(registeredDevices));
-
-      localStorage.setItem('studentData', JSON.stringify(formData));
-
-      setMessage({ type: 'success', text: `Attendance marked! You are ${Math.round(distance)}m away.` });
+      const result = await markAttendance(attendance);
       
-      setTimeout(() => {
-        navigate('/student/confirm');
-      }, 1500);
+      if (result.success) {
+        const existingAttendance = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+        existingAttendance.push(attendance);
+        localStorage.setItem('attendanceRecords', JSON.stringify(existingAttendance));
+
+        const registeredDevices = JSON.parse(localStorage.getItem('registeredDevices') || '[]');
+        registeredDevices.push({
+          ...currentDeviceInfo,
+          name: formData.name,
+          indexNumber: formData.indexNumber,
+          sessionCode: sessionInfo.sessionCode, // Store sessionCode for re-registration check
+          registeredAt: new Date().toISOString()
+        });
+        localStorage.setItem('registeredDevices', JSON.stringify(registeredDevices));
+
+        localStorage.setItem('studentData', JSON.stringify(formData));
+
+        setMessage({ type: 'success', text: `Attendance marked! You are ${Math.round(distance)}m away.` });
+        
+        setTimeout(() => {
+          navigate('/student/confirm');
+        }, 1500);
+      } else {
+        const existingAttendance = JSON.parse(localStorage.getItem('attendanceRecords') || '[]');
+        existingAttendance.push(attendance);
+        localStorage.setItem('attendanceRecords', JSON.stringify(existingAttendance));
+        
+        localStorage.setItem('studentData', JSON.stringify(formData));
+        setMessage({ type: 'success', text: `Attendance marked (offline)! You are ${Math.round(distance)}m away.` });
+        
+        setTimeout(() => {
+          navigate('/student/confirm');
+        }, 1500);
+      }
     } else {
       setMessage({ type: 'error', text: `You are ${Math.round(distance)}m away. Must be within ${sessionInfo.radius}m.` });
     }
@@ -301,10 +317,9 @@ const Register = () => {
     });
   };
 
-  // Manual retry function
   const retrySessionCheck = () => {
     if (sessionCode.length === 6) {
-      checkSessionWithServer(sessionCode);
+      checkSessionWithFirebase(sessionCode);
     }
   };
 
@@ -334,14 +349,18 @@ const Register = () => {
           </div>
 
           <div className="bg-slate-900/95 backdrop-blur-xl rounded-3xl p-6 border border-gold-500/30 shadow-2xl">
-            <div className="mb-4 p-3 bg-amber-500/20 border border-amber-500/40 rounded-xl">
+            {/* Device Registration Warning */}
+            <div className="mb-4 p-3 bg-red-500/20 border border-red-500/40 rounded-xl">
               <div className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-amber-400">security</span>
-                <p className="text-amber-200 text-xs">
-                  Enter the 6-digit code provided by your course rep
-                </p>
+                <span className="material-symbols-outlined text-red-400">device_hub</span>
+                <div className="text-red-200 text-xs">
+                  <p className="font-semibold mb-1">⚠️🔒 "System checks instantly if device already voted" </p>
+                
+                </div>
               </div>
             </div>
+
+            
 
             <div className="flex flex-col items-center mb-5">
               <div className="relative group">
@@ -493,7 +512,7 @@ const Register = () => {
                   'bg-red-500/20 border border-red-500/40 text-red-400'
                 }`}>
                   <span className="material-symbols-outlined text-lg">
-                    {message.type === 'success' ? 'check_circle' : 'error'}
+                    {message.type === 'success' ? ' check_circle' : 'error'}
                   </span>
                   {message.text}
                 </div>
@@ -534,3 +553,4 @@ const Register = () => {
 };
 
 export default Register;
+

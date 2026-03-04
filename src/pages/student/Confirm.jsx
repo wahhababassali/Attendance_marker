@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
+import { getTodayAttendance } from "../../firebase/service";
 
 export default function Confirm() {
   const navigate = useNavigate();
@@ -17,12 +18,13 @@ export default function Confirm() {
   const backgroundImage = "https://atu.edu.gh/wp-content/uploads/2024/07/2L4A8614-1-1536x1024.jpg";
 
   useEffect(() => {
-    // Load last attendance record
-    const savedAttendance = localStorage.getItem('attendanceRecords');
-    if (savedAttendance) {
-      const records = JSON.parse(savedAttendance);
-      if (records.length > 0) {
-        const latest = records[records.length - 1];
+    const loadAttendance = async () => {
+      // Try to get from Firebase first
+      const attendance = await getTodayAttendance();
+      
+      if (attendance.length > 0) {
+        // Get the most recent attendance
+        const latest = attendance[0];
         setLastAttendance(latest);
         setFormData({
           name: latest.name || '',
@@ -32,18 +34,38 @@ export default function Confirm() {
         if (latest.profileImage) {
           setImagePreview(latest.profileImage);
         }
+      } else {
+        // Fallback to localStorage
+        const savedAttendance = localStorage.getItem('attendanceRecords');
+        if (savedAttendance) {
+          const records = JSON.parse(savedAttendance);
+          if (records.length > 0) {
+            const latest = records[records.length - 1];
+            setLastAttendance(latest);
+            setFormData({
+              name: latest.name || '',
+              indexNumber: latest.indexNumber || '',
+              profileImage: latest.profileImage || null
+            });
+            if (latest.profileImage) {
+              setImagePreview(latest.profileImage);
+            }
+          }
+        }
+        
+        // Load student data
+        const savedData = localStorage.getItem('studentData');
+        if (savedData && !lastAttendance) {
+          const parsed = JSON.parse(savedData);
+          setFormData(parsed);
+          if (parsed.profileImage) {
+            setImagePreview(parsed.profileImage);
+          }
+        }
       }
-    }
+    };
     
-    // Load student data
-    const savedData = localStorage.getItem('studentData');
-    if (savedData && !lastAttendance) {
-      const parsed = JSON.parse(savedData);
-      setFormData(parsed);
-      if (parsed.profileImage) {
-        setImagePreview(parsed.profileImage);
-      }
-    }
+    loadAttendance();
   }, []);
 
   const handleSave = () => {
@@ -76,6 +98,15 @@ export default function Confirm() {
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  // Helper function to convert Firebase timestamp
+  const getTimestamp = (timestamp) => {
+    if (!timestamp) return new Date();
+    if (timestamp.seconds) {
+      return new Date(timestamp.seconds * 1000);
+    }
+    return new Date(timestamp);
   };
 
   return (
@@ -141,7 +172,7 @@ export default function Confirm() {
                   </div>
                   <div className="flex justify-between items-center py-2 border-b border-white/10">
                     <span className="text-slate-300">Time</span>
-                    <span className="text-white">{new Date(lastAttendance.timestamp).toLocaleTimeString()}</span>
+                    <span className="text-white">{getTimestamp(lastAttendance.timestamp).toLocaleTimeString()}</span>
                   </div>
                   
                   {/* DISTANCE STATUS - ADDED */}

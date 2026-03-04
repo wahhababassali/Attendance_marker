@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { 
+  createSession, 
+  endSession, 
+  getTodayAttendance, 
+  saveCourseRep,
+  createAdminCode,
+  subscribeToAttendance
+} from '../../firebase/service';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -8,7 +16,7 @@ const Dashboard = () => {
   const [adminLocation, setAdminLocation] = useState(null);
   const [sessionCode, setSessionCode] = useState('');
   const [courseTitle, setCourseTitle] = useState('');
-  const [courseCode, setCourseCode] = useState('');
+  const [courseCodeVal, setCourseCodeVal] = useState('');
   const [program, setProgram] = useState('');
   const [radius, setRadius] = useState(50);
   const [attendanceList, setAttendanceList] = useState([]);
@@ -39,29 +47,32 @@ const Dashboard = () => {
     }
   }, []);
 
-  // Load existing attendance on mount
+  // Load existing session and attendance on mount
   useEffect(() => {
-    const savedAttendance = localStorage.getItem('attendanceRecords');
-    if (savedAttendance) {
-      const records = JSON.parse(savedAttendance);
-      const today = new Date().toDateString();
-      const todayRecords = records.filter(r => new Date(r.timestamp).toDateString() === today);
-      setAttendanceList(todayRecords);
-    }
+    const loadData = async () => {
+      // Check for active session in localStorage
+      const savedAdminCode = localStorage.getItem('adminCode');
+      if (savedAdminCode) {
+        const adminData = localStorage.getItem('adminLive');
+        if (adminData) {
+          const session = JSON.parse(adminData);
+          setSessionActive(true);
+          setSessionCode(session.sessionCode);
+          setCourseTitle(session.courseTitle);
+          setCourseCodeVal(session.courseCode);
+          setProgram(session.program);
+          setRadius(session.radius);
+          setAdminLocation({ lat: session.lat, lng: session.lng });
+          setLocationStatus('success');
+        }
+      }
+      
+      // Load today's attendance from Firebase
+      const attendance = await getTodayAttendance();
+      setAttendanceList(attendance);
+    };
     
-    // Check for active session
-    const adminData = localStorage.getItem('adminLive');
-    if (adminData) {
-      const session = JSON.parse(adminData);
-      setSessionActive(true);
-      setSessionCode(session.sessionCode);
-      setCourseTitle(session.courseTitle);
-      setCourseCode(session.courseCode);
-      setProgram(session.program);
-      setRadius(session.radius);
-      setAdminLocation({ lat: session.lat, lng: session.lng });
-      setLocationStatus('success');
-    }
+    loadData();
   }, []);
 
   // Generate random session code automatically
@@ -101,9 +112,9 @@ const Dashboard = () => {
     );
   };
 
-  // Start session - UPDATED with better logging
-  const startSession = () => {
-    if (!courseTitle || !courseCode || !program) {
+  // Start session - saves to Firebase
+  const startSession = async () => {
+    if (!courseTitle || !courseCodeVal || !program) {
       alert('Please fill in all course details');
       return;
     }
@@ -115,92 +126,123 @@ const Dashboard = () => {
     const newSessionCode = generateSessionCode();
     setSessionCode(newSessionCode);
     
-    console.log('🎲 Generated code for students:', newSessionCode);
+    console.log('Generated code for students:', newSessionCode);
 
     const sessionData = {
       courseTitle,
-      courseCode,
+      courseCode: courseCodeVal,
       program,
       radius: parseInt(radius),
       lat: adminLocation.lat,
       lng: adminLocation.lng,
       sessionCode: newSessionCode,
-      startTime: new Date().toISOString()
+      startTime: new Date().toISOString(),
+      active: true
     };
 
+    // Save to Firebase
+    await createSession(sessionData);
+    
+    // Also save to localStorage for backup
     localStorage.setItem('adminLive', JSON.stringify(sessionData));
     
-    // Verify it saved
-    const saved = JSON.parse(localStorage.getItem('adminLive'));
-    console.log('✅ Session saved with code:', saved.sessionCode);
+    console.log('Session saved to Firebase with code:', newSessionCode);
     
     setSessionActive(true);
   };
 
-  // End session - UPDATED to clear device registrations
-  const endSession = () => {
-    // Remove current session
+  // End session
+  const endSessionHandler = async () => {
+    await endSession(sessionCode);
     localStorage.removeItem('adminLive');
-    
-    // IMPORTANT: Clear all student registrations for new session
-    // This allows students to register again with new session code
-    localStorage.removeItem('registeredDevices');
-    
-    // Keep attendance records for history but clear for new session display
-    // localStorage.removeItem('attendanceRecords');
     
     setSessionActive(false);
     setSessionCode('');
     setCourseTitle('');
-    setCourseCode('');
+    setCourseCodeVal('');
     setProgram('');
     
-    console.log('✅ Session ended. Students can now register with new code.');
-    
-    // Show success message
     alert('Session ended. Students can now register with a new session code.');
   };
 
   // Refresh attendance list
-  const refreshAttendance = () => {
-    const savedAttendance = localStorage.getItem('attendanceRecords');
-    if (savedAttendance) {
-      const records = JSON.parse(savedAttendance);
-      const today = new Date().toDateString();
-      const todayRecords = records.filter(r => new Date(r.timestamp).toDateString() === today);
-      // Filter by current session if active
-      const filteredRecords = sessionCode 
-        ? todayRecords.filter(r => r.sessionCode === sessionCode)
-        : todayRecords;
-      setAttendanceList(filteredRecords);
-    }
+  const refreshAttendance = async () => {
+    const attendance = await getTodayAttendance();
+    const today = new Date().toDateString();
+    const todayRecords = attendance.filter(r => {
+      if (r.timestamp && r.timestamp.seconds) {
+        return new Date(r.timestamp.seconds * 1000).toDateString() === today;
+      }
+      return false;
+    });
+    
+    const filteredRecords = sessionCode 
+      ? todayRecords.filter(r => r.sessionCode === sessionCode)
+      : todayRecords;
+      
+    setAttendanceList(filteredRecords);
   };
 
-  // Update attendance list periodically
+  // Real-time attendance listener - ALWAYS listens for updates
   useEffect(() => {
-    if (sessionActive) {
-      const interval = setInterval(refreshAttendance, 3000);
-      return () => clearInterval(interval);
-    }
+    let unsubscribe = null;
+    
+    // Always set up the real-time listener regardless of session state
+    const sessionCodeToListen = sessionActive ? sessionCode : null;
+    
+    unsubscribe = subscribeToAttendance(sessionCodeToListen, (records) => {
+      // Filter to only show today's records
+      const today = new Date().toDateString();
+      const todayRecords = records.filter(r => {
+        if (r.timestamp && r.timestamp.seconds) {
+          return new Date(r.timestamp.seconds * 1000).toDateString() === today;
+        }
+        return true;
+      });
+      
+      // If there's a specific session code, filter by it
+      if (sessionCodeToListen) {
+        const filtered = todayRecords.filter(r => r.sessionCode === sessionCodeToListen);
+        setAttendanceList(filtered);
+      } else {
+        setAttendanceList(todayRecords);
+      }
+    });
+    
+    // Cleanup: unsubscribe when session ends or component unmounts
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, [sessionActive, sessionCode]);
 
+  // Fallback periodic refresh (only when no active session or as backup)
+  useEffect(() => {
+    if (!sessionActive) {
+      const interval = setInterval(refreshAttendance, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [sessionActive]);
+
   // Save edited profile
-  const saveProfile = () => {
+  const saveProfile = async () => {
     if (!editForm.name || !editForm.indexNumber) {
       alert('Please fill in all fields');
       return;
     }
+    
+    await saveCourseRep(editForm);
     localStorage.setItem('courseRepData', JSON.stringify(editForm));
     setCourseRep(editForm);
     setShowEditProfile(false);
   };
 
-  // Download PDF directly from dashboard
+  // Download PDF
   const downloadPDF = () => {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
 
-    // Course Info Header
     doc.setFontSize(16);
     doc.setTextColor(40, 40, 40);
     doc.text('Attendance Report', 14, 20);
@@ -208,81 +250,107 @@ const Dashboard = () => {
     doc.setFontSize(12);
     doc.setTextColor(60, 60, 60);
     doc.text(`Course: ${courseTitle}`, 14, 30);
-    doc.text(`Course Code: ${courseCode}`, 14, 36);
+    doc.text(`Course Code: ${courseCodeVal}`, 14, 36);
     doc.text(`Program: ${program}`, 14, 42);
     doc.text(`Session Code: ${sessionCode}`, 14, 48);
     doc.text(`Date: ${new Date().toLocaleDateString()}`, 14, 54);
     
-    // Summary
-    doc.setFontSize(10);
-    doc.setTextColor(100, 100, 100);
     const presentCount = attendanceList.filter(r => r.status === 'Present').length;
     doc.text(`Total Students: ${attendanceList.length}`, 14, 65);
     doc.text(`Present: ${presentCount}`, 14, 71);
-    doc.text(`Absent: ${attendanceList.length - presentCount}`, 14, 77);
 
-    // Table data
     const tableData = attendanceList.map(record => [
-      record.name,
-      record.indexNumber,
-      record.className || '-',
+      record.name || 'N/A',
+      record.indexNumber || 'N/A',
       record.status === 'Present' ? 'Present' : 'Absent'
     ]);
 
-    // Generate table
     doc.autoTable({
-      head: [['Name', 'Index Number', 'Class', 'Status']],
+      head: [['Name', 'Index Number', 'Status']],
       body: tableData,
       startY: 85,
-      styles: {
-        fontSize: 10,
-        cellPadding: 4,
-      },
-      headStyles: {
-        fillColor: [201, 162, 39],
-        textColor: 255,
-        fontStyle: 'bold',
-      },
-      alternateRowStyles: {
-        fillColor: [245, 247, 250],
-      },
     });
 
-    // Save
     doc.save(`attendance_${sessionCode}_${new Date().toISOString().split('T')[0]}.pdf`);
   };
 
-  // Get radius color based on value
   const getRadiusColor = () => {
     if (radius <= 30) return 'text-green-400';
     if (radius <= 60) return 'text-yellow-400';
     return 'text-orange-400';
   };
 
-  // Get radius recommendation
   const getRadiusRecommendation = () => {
     if (radius <= 30) return 'Small classroom';
     if (radius <= 60) return 'Lecture hall';
     return 'Outdoor area';
   };
 
+  // Admin code setup state
+  const [showAdminSetup, setShowAdminSetup] = useState(false);
+  const [adminCodeInput, setAdminCodeInput] = useState('');
+  const [validityMonths, setValidityMonths] = useState(4);
+  const [isCreatingCode, setIsCreatingCode] = useState(false);
+  const [codeMessage, setCodeMessage] = useState({ type: '', text: '' });
+
+  // Check if admin code exists
+  useEffect(() => {
+    const existingCode = localStorage.getItem('adminCode');
+    if (existingCode) {
+      setShowAdminSetup(false);
+    } else {
+      setShowAdminSetup(true);
+    }
+  }, []);
+
+  // Create admin code
+  const handleCreateAdminCode = async () => {
+    if (!adminCodeInput || adminCodeInput.length < 6) {
+      setCodeMessage({ type: 'error', text: 'Please enter a code with at least 6 characters' });
+      return;
+    }
+
+    setIsCreatingCode(true);
+    setCodeMessage({ type: '', text: '' });
+
+    try {
+      const result = await createAdminCode(adminCodeInput, validityMonths);
+      if (result.success) {
+        setCodeMessage({ type: 'success', text: result.offline ? 'Code saved offline!' : 'Admin code created!' });
+        setShowAdminSetup(false);
+      } else {
+        setCodeMessage({ type: 'error', text: result.error || 'Failed to create code' });
+      }
+    } catch (error) {
+      setCodeMessage({ type: 'error', text: 'Error: ' + error.message });
+    }
+
+    setIsCreatingCode(false);
+  };
+
+  // Generate random admin code
+  const generateAdminCode = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let code = '';
+    for (let i = 0; i < 8; i++) {
+      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setAdminCodeInput(code);
+  };
+
   return (
     <div className="min-h-screen relative">
-      {/* Background Image */}
       <div 
         className="fixed inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: `url(${backgroundImage})` }}
       ></div>
       
-      {/* Dark Overlay for better contrast */}
       <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm"></div>
 
       <div className="relative z-10">
-        {/* Header */}
         <header className="sticky top-0 z-50 bg-slate-900/90 backdrop-blur-xl border-b border-gold-500/30">
           <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              {/* Logo */}
               <div className="w-14 h-14 flex items-center justify-center">
                 <img 
                   src={schoolLogo} 
@@ -298,7 +366,6 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="flex items-center gap-3">
-              {/* Course Rep Info */}
               {courseRep.name && (
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/80 rounded-lg border border-gold-500/30">
                   <div className="w-8 h-8 bg-gradient-to-r from-gold-500 to-amber-500 rounded-full flex items-center justify-center">
@@ -316,7 +383,6 @@ const Dashboard = () => {
                       setShowEditProfile(true);
                     }}
                     className="ml-1 p-1 hover:bg-slate-700 rounded transition-colors"
-                    title="Edit profile"
                   >
                     <span className="material-symbols-outlined text-slate-400 text-lg">edit</span>
                   </button>
@@ -340,8 +406,73 @@ const Dashboard = () => {
 
         <main className="max-w-7xl mx-auto px-4 py-6">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column - Session Controls */}
             <div className="lg:col-span-1 space-y-6">
+              {/* Admin Code Setup - Show if no admin code exists */}
+              {showAdminSetup && (
+                <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 border border-blue-500/30 shadow-2xl">
+                  <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
+                    <span className="material-symbols-outlined text-blue-400">admin_panel_settings</span>
+                    Setup Admin Access
+                  </h2>
+                  <p className="text-sm text-slate-300 mb-4">
+                    Create an admin code to secure your dashboard.
+                  </p>
+                  
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-sm text-slate-300 mb-2">Admin Code</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={adminCodeInput}
+                          onChange={(e) => setAdminCodeInput(e.target.value.toUpperCase())}
+                          maxLength={8}
+                          className="flex-1 px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm font-mono"
+                          placeholder="Enter code"
+                        />
+                        <button
+                          type="button"
+                          onClick={generateAdminCode}
+                          className="px-3 py-2 bg-slate-700 rounded-xl"
+                        >
+                          <span className="material-symbols-outlined">casino</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-slate-300 mb-2">Valid for</label>
+                      <select
+                        value={validityMonths}
+                        onChange={(e) => setValidityMonths(parseInt(e.target.value))}
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white text-sm"
+                      >
+                        <option value={1}>1 month</option>
+                        <option value={4}>4 months</option>
+                        <option value={6}>6 months</option>
+                        <option value={12}>1 year</option>
+                      </select>
+                    </div>
+
+                    {codeMessage.text && (
+                      <div className={`p-3 rounded-xl text-sm ${
+                        codeMessage.type === 'success' ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                      }`}>
+                        {codeMessage.text}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleCreateAdminCode}
+                      disabled={isCreatingCode || !adminCodeInput}
+                      className="w-full bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm"
+                    >
+                      {isCreatingCode ? 'Creating...' : 'Create Admin Code'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* Session Status Card */}
               <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 border border-gold-500/30 shadow-2xl">
                 <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
@@ -351,85 +482,62 @@ const Dashboard = () => {
 
                 {!sessionActive ? (
                   <div className="space-y-4">
-                    {/* Course Title */}
                     <div>
                       <label className="block text-sm text-slate-300 mb-2">Course Title</label>
                       <input
                         type="text"
                         value={courseTitle}
                         onChange={(e) => setCourseTitle(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500/50 text-sm"
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 text-sm"
                         placeholder="e.g., Web Development"
                       />
                     </div>
 
-                    {/* Course Code */}
                     <div>
                       <label className="block text-sm text-slate-300 mb-2">Course Code</label>
                       <input
                         type="text"
-                        value={courseCode}
-                        onChange={(e) => setCourseCode(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500/50 text-sm"
+                        value={courseCodeVal}
+                        onChange={(e) => setCourseCodeVal(e.target.value)}
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 text-sm"
                         placeholder="e.g., CS401"
                       />
                     </div>
 
-                    {/* Program */}
                     <div>
                       <label className="block text-sm text-slate-300 mb-2">Program Name</label>
                       <input
                         type="text"
                         value={program}
                         onChange={(e) => setProgram(e.target.value)}
-                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500/50 text-sm"
+                        className="w-full px-4 py-2.5 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 text-sm"
                         placeholder="e.g., Computer Science"
                       />
                     </div>
 
-                    {/* Enhanced Radius Slider */}
                     <div className="bg-slate-800/50 rounded-xl p-4 border border-gold-500/20">
                       <label className="block text-sm text-slate-300 mb-3 flex items-center gap-2">
-                        <span className="material-symbols-outlined text-gold-400 text-lg">distance</span>
-                        <span>Attendance Radius</span>
+                        <span className="material-symbols-outlined text-gold-400">distance</span>
+                        Attendance Radius
                       </label>
-                      
                       <div className="flex items-center gap-3 mb-2">
-                        <span className="text-xs text-slate-500 w-8">10m</span>
+                        <span className="text-xs text-slate-500">10m</span>
                         <input
                           type="range"
                           min="10"
                           max="100"
-                          step="5"
                           value={radius}
                           onChange={(e) => setRadius(parseInt(e.target.value))}
-                          className="flex-1 h-2 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-gold-500"
+                          className="flex-1"
                         />
-                        <span className="text-xs text-slate-500 w-8">100m</span>
+                        <span className="text-xs text-slate-500">100m</span>
                       </div>
-
-                      <div className="flex justify-between items-center mt-2">
-                        <div>
-                          <span className="text-xs text-slate-400 block">Selected</span>
-                          <span className={`text-2xl font-bold ${getRadiusColor()}`}>{radius}m</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-xs text-slate-400 block">Recommended for</span>
-                          <span className="text-sm text-gold-400">{getRadiusRecommendation()}</span>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 pt-2 border-t border-slate-700">
-                        <div className="flex items-start gap-2">
-                          <span className="material-symbols-outlined text-gold-400 text-sm">info</span>
-                          <p className="text-xs text-slate-400">
-                            Students must be within <span className="text-gold-400 font-bold">{radius}m</span> of your location to mark attendance
-                          </p>
-                        </div>
+                      <div className="flex justify-between">
+                        <span className={`text-xl font-bold ${getRadiusColor()}`}>{radius}m</span>
+                        <span className="text-sm text-gold-400">{getRadiusRecommendation()}</span>
                       </div>
                     </div>
 
-                    {/* Location Capture */}
                     <div className="bg-slate-800 rounded-xl p-3 border border-slate-600">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -457,7 +565,7 @@ const Dashboard = () => {
                           type="button"
                           onClick={getAdminLocation}
                           disabled={locationStatus === 'loading'}
-                          className="px-3 py-1.5 bg-gradient-to-r from-gold-500 to-amber-500 hover:from-gold-400 hover:to-amber-400 disabled:from-slate-600 disabled:to-slate-700 text-slate-900 text-xs font-semibold rounded-lg transition-all"
+                          className="px-3 py-1.5 bg-gradient-to-r from-gold-500 to-amber-500 text-slate-900 text-xs font-semibold rounded-lg"
                         >
                           {locationStatus === 'loading' ? 'Getting...' : 'Capture'}
                         </button>
@@ -466,7 +574,7 @@ const Dashboard = () => {
 
                     <button
                       onClick={startSession}
-                      className="w-full gold-button py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm font-semibold text-slate-900"
+                      className="w-full gold-button py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold text-slate-900"
                     >
                       <span className="material-symbols-outlined">play_circle</span>
                       Start Session
@@ -474,39 +582,25 @@ const Dashboard = () => {
                   </div>
                 ) : (
                   <div className="space-y-4">
-                    {/* Active Session Info */}
                     <div className="p-4 bg-green-500/20 border border-green-500/40 rounded-xl">
                       <div className="flex items-center gap-2 text-green-400 mb-2">
-                        <span className="material-symbols-outlined text-sm">check_circle</span>
-                        <span className="font-semibold text-sm">Session Active</span>
+                        <span className="material-symbols-outlined">check_circle</span>
+                        <span className="font-semibold">Session Active</span>
                       </div>
                       <p className="text-white font-bold text-lg">{courseTitle}</p>
-                      <p className="text-slate-300 text-sm">{courseCode} • {program}</p>
-                      
-                      {/* Show active radius */}
-                      <div className="mt-3 flex items-center gap-2 text-sm">
-                        <span className="material-symbols-outlined text-gold-400 text-base">distance</span>
-                        <span className="text-slate-300">Radius:</span>
-                        <span className="text-gold-400 font-bold">{radius}m</span>
-                        <span className="text-xs text-slate-500 ml-auto">{getRadiusRecommendation()}</span>
-                      </div>
+                      <p className="text-slate-300 text-sm">{courseCodeVal} • {program}</p>
                     </div>
 
-                    {/* Session Code Display */}
                     <div className="p-4 bg-slate-800 rounded-xl border border-gold-500/30 text-center">
                       <p className="text-xs text-slate-400 mb-2">Share this code with students</p>
-                      <p className="text-4xl font-black tracking-[0.3em] gold-gradient-text font-mono bg-gold-500/10 px-4 py-3 rounded-xl border border-gold-500/20">
+                      <p className="text-4xl font-black tracking-[0.3em] gold-gradient-text font-mono">
                         {sessionCode}
-                      </p>
-                      <p className="text-xs text-slate-500 mt-3 flex items-center justify-center gap-1">
-                        <span className="material-symbols-outlined text-xs">info</span>
-                        Students need this code to join
                       </p>
                     </div>
 
                     <button
-                      onClick={endSession}
-                      className="w-full bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-semibold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm"
+                      onClick={endSessionHandler}
+                      className="w-full bg-gradient-to-r from-red-600 to-red-700 text-white font-semibold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-sm"
                     >
                       <span className="material-symbols-outlined">stop</span>
                       End Session
@@ -516,7 +610,6 @@ const Dashboard = () => {
               </div>
             </div>
 
-            {/* Right Column - Attendance List */}
             <div className="lg:col-span-2">
               <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl p-5 border border-gold-500/30 shadow-2xl">
                 <div className="flex items-center justify-between mb-4">
@@ -529,7 +622,7 @@ const Dashboard = () => {
                   </h2>
                   <button
                     onClick={refreshAttendance}
-                    className="p-2 hover:bg-slate-800 rounded-lg transition-colors border border-slate-700"
+                    className="p-2 hover:bg-slate-800 rounded-lg border border-slate-700"
                   >
                     <span className="material-symbols-outlined text-gold-400">refresh</span>
                   </button>
@@ -537,27 +630,26 @@ const Dashboard = () => {
 
                 {attendanceList.length === 0 ? (
                   <div className="text-center py-10">
-                    <div className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3 border border-slate-700">
+                    <div className="w-14 h-14 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-3">
                       <span className="material-symbols-outlined text-slate-500 text-2xl">group_add</span>
                     </div>
                     <p className="text-slate-300">No students have marked attendance yet</p>
-                    <p className="text-slate-500 text-xs mt-1">Students will appear here when they join</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full">
                       <thead>
                         <tr className="border-b border-slate-700">
-                          <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider pb-2">Profile</th>
-                          <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider pb-2">Name</th>
-                          <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider pb-2">Index No.</th>
-                          <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider pb-2">Time</th>
-                          <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider pb-2">Distance</th>
+                          <th className="text-left text-xs font-medium text-gold-400 pb-2">Profile</th>
+                          <th className="text-left text-xs font-medium text-gold-400 pb-2">Name</th>
+                          <th className="text-left text-xs font-medium text-gold-400 pb-2">Index No.</th>
+                          <th className="text-left text-xs font-medium text-gold-400 pb-2">Time</th>
+                          <th className="text-left text-xs font-medium text-gold-400 pb-2">Distance</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-700">
                         {attendanceList.map((record, index) => (
-                          <tr key={index} className="hover:bg-slate-800/50 transition-colors">
+                          <tr key={index}>
                             <td className="py-2">
                               <div className="w-8 h-8 rounded-full overflow-hidden border border-gold-500/30">
                                 {record.profileImage ? (
@@ -569,19 +661,20 @@ const Dashboard = () => {
                                 )}
                               </div>
                             </td>
-                            <td className="py-2 text-white font-medium text-sm">{record.name}</td>
-                            <td className="py-2 text-slate-300 font-mono text-sm">{record.indexNumber}</td>
+                            <td className="py-2 text-white text-sm">{record.name || 'N/A'}</td>
+                            <td className="py-2 text-slate-300 font-mono text-sm">{record.indexNumber || 'N/A'}</td>
                             <td className="py-2 text-slate-400 text-xs">
-                              {new Date(record.timestamp).toLocaleTimeString()}
+                              {record.timestamp && record.timestamp.seconds 
+                                ? new Date(record.timestamp.seconds * 1000).toLocaleTimeString()
+                                : 'N/A'}
                             </td>
                             <td className="py-2">
-                              <span className={`text-xs font-mono px-2 py-1 rounded ${
-                                record.distance <= radius 
+                              <span className={`text-xs px-2 py-1 rounded ${
+                                (record.distance || 0) <= radius 
                                   ? 'bg-green-500/20 text-green-400' 
                                   : 'bg-red-500/20 text-red-400'
                               }`}>
-                                {record.distance}m
-                                {record.distance <= radius && ' ✅'}
+                                {record.distance || 0}m
                               </span>
                             </td>
                           </tr>
@@ -592,21 +685,10 @@ const Dashboard = () => {
                 )}
               </div>
 
-              {/* Action Buttons */}
               <div className="mt-4 flex gap-3">
                 <button
-                  onClick={() => {
-                    if (!window.jspdf) {
-                      alert('PDF library not loaded. Please refresh the page.');
-                      return;
-                    }
-                    if (attendanceList.length === 0) {
-                      alert('No attendance records to download.');
-                      return;
-                    }
-                    downloadPDF();
-                  }}
-                  className={`flex-1 font-semibold py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm ${
+                  onClick={downloadPDF}
+                  className={`flex-1 py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-sm ${
                     attendanceList.length > 0 
                       ? 'gold-button text-slate-900' 
                       : 'bg-slate-700 text-slate-500 cursor-not-allowed'
@@ -617,7 +699,7 @@ const Dashboard = () => {
                 </button>
                 <button
                   onClick={() => navigate('/admin/print')}
-                  className="flex-1 gold-button text-slate-900 py-2.5 px-4 rounded-xl transition-all flex items-center justify-center gap-2 text-sm font-semibold"
+                  className="flex-1 gold-button text-slate-900 py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 text-sm"
                 >
                   <span className="material-symbols-outlined">preview</span>
                   View All Records
@@ -628,15 +710,11 @@ const Dashboard = () => {
         </main>
       </div>
 
-      {/* Edit Profile Modal */}
       {showEditProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShowEditProfile(false)}></div>
-          <div className="relative bg-slate-900 rounded-2xl p-6 border border-gold-500/30 shadow-2xl w-full max-w-md">
-            <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-              <span className="material-symbols-outlined text-gold-400">edit</span>
-              Edit Profile
-            </h3>
+          <div className="absolute inset-0 bg-black/70" onClick={() => setShowEditProfile(false)}></div>
+          <div className="relative bg-slate-900 rounded-2xl p-6 border border-gold-500/30 w-full max-w-md">
+            <h3 className="text-xl font-bold text-white mb-4">Edit Profile</h3>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm text-slate-300 mb-2">Your Name</label>
@@ -644,8 +722,7 @@ const Dashboard = () => {
                   type="text"
                   value={editForm.name}
                   onChange={(e) => setEditForm({...editForm, name: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500/50"
-                  placeholder="Enter your name"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white"
                 />
               </div>
               <div>
@@ -654,21 +731,20 @@ const Dashboard = () => {
                   type="text"
                   value={editForm.indexNumber}
                   onChange={(e) => setEditForm({...editForm, indexNumber: e.target.value})}
-                  className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-gold-500 focus:border-gold-500/50"
-                  placeholder="Enter your index number"
+                  className="w-full px-4 py-3 bg-slate-800 border border-slate-600 rounded-xl text-white"
                 />
               </div>
             </div>
             <div className="flex gap-3 mt-6">
               <button
                 onClick={() => setShowEditProfile(false)}
-                className="flex-1 py-3 px-4 bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-xl transition-colors"
+                className="flex-1 py-3 bg-slate-700 text-white rounded-xl"
               >
                 Cancel
               </button>
               <button
                 onClick={saveProfile}
-                className="flex-1 py-3 px-4 gold-button text-slate-900 font-semibold rounded-xl transition-all"
+                className="flex-1 py-3 gold-button text-slate-900 rounded-xl"
               >
                 Save Changes
               </button>
@@ -681,3 +757,4 @@ const Dashboard = () => {
 };
 
 export default Dashboard;
+

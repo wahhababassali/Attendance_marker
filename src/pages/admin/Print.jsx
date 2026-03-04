@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { getAllAttendance } from '../../firebase/service';
 
 const Print = () => {
   const navigate = useNavigate();
@@ -12,32 +13,72 @@ const Print = () => {
 
   // Load attendance on mount
   useEffect(() => {
-    const savedAttendance = localStorage.getItem('attendanceRecords');
-    if (savedAttendance) {
-      const records = JSON.parse(savedAttendance);
-      // Sort by timestamp (newest first)
-      records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      setAttendanceList(records);
-      setFilteredList(records);
+    const loadAttendance = async () => {
+      // Try Firebase first
+      const records = await getAllAttendance();
       
-      // Get unique sessions
-      const uniqueSessions = [];
-      const seen = new Set();
-      records.forEach(record => {
-        const sessionKey = `${record.courseCode}-${record.sessionCode}`;
-        if (!seen.has(sessionKey)) {
-          seen.add(sessionKey);
-          uniqueSessions.push({
-            courseTitle: record.courseTitle,
-            courseCode: record.courseCode,
-            program: record.program,
-            sessionCode: record.sessionCode,
-            date: new Date(record.timestamp).toLocaleDateString()
+      if (records.length > 0) {
+        // Convert Firebase timestamps and sort
+        const processedRecords = records.map(record => ({
+          ...record,
+          timestamp: record.timestamp?.seconds 
+            ? new Date(record.timestamp.seconds * 1000)
+            : new Date(record.timestamp || Date.now())
+        }));
+        
+        // Sort by timestamp (newest first)
+        processedRecords.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+        setAttendanceList(processedRecords);
+        setFilteredList(processedRecords);
+        
+        // Get unique sessions
+        const uniqueSessions = [];
+        const seen = new Set();
+        processedRecords.forEach(record => {
+          const sessionKey = `${record.courseCode}-${record.sessionCode}`;
+          if (!seen.has(sessionKey)) {
+            seen.add(sessionKey);
+            uniqueSessions.push({
+              courseTitle: record.courseTitle,
+              courseCode: record.courseCode,
+              program: record.program,
+              sessionCode: record.sessionCode,
+              date: new Date(record.timestamp).toLocaleDateString()
+            });
+          }
+        });
+        setSessions(uniqueSessions);
+      } else {
+        // Fallback to localStorage
+        const savedAttendance = localStorage.getItem('attendanceRecords');
+        if (savedAttendance) {
+          const records = JSON.parse(savedAttendance);
+          records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+          setAttendanceList(records);
+          setFilteredList(records);
+          
+          // Get unique sessions
+          const uniqueSessions = [];
+          const seen = new Set();
+          records.forEach(record => {
+            const sessionKey = `${record.courseCode}-${record.sessionCode}`;
+            if (!seen.has(sessionKey)) {
+              seen.add(sessionKey);
+              uniqueSessions.push({
+                courseTitle: record.courseTitle,
+                courseCode: record.courseCode,
+                program: record.program,
+                sessionCode: record.sessionCode,
+                date: new Date(record.timestamp).toLocaleDateString()
+              });
+            }
           });
+          setSessions(uniqueSessions);
         }
-      });
-      setSessions(uniqueSessions);
-    }
+      }
+    };
+    
+    loadAttendance();
   }, []);
 
   // Filter attendance
@@ -46,8 +87,8 @@ const Print = () => {
     
     if (searchTerm) {
       filtered = filtered.filter(record => 
-        record.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        record.indexNumber.toLowerCase().includes(searchTerm.toLowerCase())
+        (record.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (record.indexNumber || '').toLowerCase().includes(searchTerm.toLowerCase())
       );
     }
     
@@ -91,15 +132,15 @@ const Print = () => {
 
     // Table data
     const tableData = filteredList.map(record => [
-      record.name,
-      record.indexNumber,
-      record.className || '-',
+      record.name || 'N/A',
+      record.indexNumber || 'N/A',
+      record.courseTitle || '-',
       record.status === 'Present' ? 'Present' : 'Absent'
     ]);
 
     // Generate table
     doc.autoTable({
-      head: [['Name', 'Index Number', 'Class', 'Status']],
+      head: [['Name', 'Index Number', 'Course Title', 'Status']],
       body: tableData,
       startY: summaryY + 20,
       styles: {
@@ -128,6 +169,23 @@ const Print = () => {
 
     // Save
     doc.save(`attendance_${courseFilter || 'report'}_${new Date().toISOString().split('T')[0]}.pdf`);
+  };
+
+  // Refresh from Firebase
+  const refreshData = async () => {
+    const records = await getAllAttendance();
+    
+    if (records.length > 0) {
+      const processedRecords = records.map(record => ({
+        ...record,
+        timestamp: record.timestamp?.seconds 
+          ? new Date(record.timestamp.seconds * 1000)
+          : new Date(record.timestamp || Date.now())
+      }));
+      
+      processedRecords.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      setAttendanceList(processedRecords);
+    }
   };
 
   return (
@@ -233,14 +291,7 @@ const Print = () => {
 
             {/* Refresh */}
             <button
-              onClick={() => {
-                const savedAttendance = localStorage.getItem('attendanceRecords');
-                if (savedAttendance) {
-                  const records = JSON.parse(savedAttendance);
-                  records.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-                  setAttendanceList(records);
-                }
-              }}
+              onClick={refreshData}
               className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white transition-colors flex items-center gap-2 hover:border-gold-500/30"
             >
               <span className="material-symbols-outlined">refresh</span>
@@ -335,7 +386,7 @@ const Print = () => {
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Profile</th>
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Name</th>
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Index Number</th>
-                    <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Class</th>
+                    <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Course Title</th>
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Course Code</th>
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Timestamp</th>
                     <th className="text-left text-xs font-medium text-gold-400 uppercase tracking-wider px-6 py-4">Status</th>
@@ -355,9 +406,9 @@ const Print = () => {
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-white font-medium">{record.name}</td>
-                      <td className="px-6 py-4 text-slate-300 font-mono">{record.indexNumber}</td>
-                      <td className="px-6 py-4 text-slate-300">{record.className || '-'}</td>
+                      <td className="px-6 py-4 text-white font-medium">{record.name || 'N/A'}</td>
+                      <td className="px-6 py-4 text-slate-300 font-mono">{record.indexNumber || 'N/A'}</td>
+                      <td className="px-6 py-4 text-slate-300">{record.courseTitle || '-'}</td>
                       <td className="px-6 py-4 text-slate-300 font-medium">{record.courseCode || '-'}</td>
                       <td className="px-6 py-4 text-slate-400 text-sm">
                         <div>{new Date(record.timestamp).toLocaleDateString()}</div>
